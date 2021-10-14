@@ -1,0 +1,5 @@
+.DS_Store
+/.gitmodules
+/firmware.bin
+/obj/
+/out/
