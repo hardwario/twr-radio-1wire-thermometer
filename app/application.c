@@ -1,45 +1,18 @@
 #include <application.h>
 #include <at.h>
 
-#define SEND_DATA_INTERVAL        (15 * 60 * 1000)
-#define MEASURE_INTERVAL               (30 * 1000)
+#define SEND_DATA_INTERVAL            (15 * 60 * 1000)
+#define MEASURE_INTERVAL                   (30 * 1000)
+#define BATTERY_UPDATE_INTERVAL       (60 * 60 * 1000)
 
 #define DS18B20_SENSOR_COUNT 10
-TWR_DATA_STREAM_FLOAT_BUFFER(sm_temperature_buffer_0, (SEND_DATA_INTERVAL / MEASURE_INTERVAL))
-TWR_DATA_STREAM_FLOAT_BUFFER(sm_temperature_buffer_1, (SEND_DATA_INTERVAL / MEASURE_INTERVAL))
-TWR_DATA_STREAM_FLOAT_BUFFER(sm_temperature_buffer_2, (SEND_DATA_INTERVAL / MEASURE_INTERVAL))
-TWR_DATA_STREAM_FLOAT_BUFFER(sm_temperature_buffer_3, (SEND_DATA_INTERVAL / MEASURE_INTERVAL))
-TWR_DATA_STREAM_FLOAT_BUFFER(sm_temperature_buffer_4, (SEND_DATA_INTERVAL / MEASURE_INTERVAL))
-TWR_DATA_STREAM_FLOAT_BUFFER(sm_temperature_buffer_5, (SEND_DATA_INTERVAL / MEASURE_INTERVAL))
-TWR_DATA_STREAM_FLOAT_BUFFER(sm_temperature_buffer_6, (SEND_DATA_INTERVAL / MEASURE_INTERVAL))
-TWR_DATA_STREAM_FLOAT_BUFFER(sm_temperature_buffer_7, (SEND_DATA_INTERVAL / MEASURE_INTERVAL))
-TWR_DATA_STREAM_FLOAT_BUFFER(sm_temperature_buffer_8, (SEND_DATA_INTERVAL / MEASURE_INTERVAL))
-TWR_DATA_STREAM_FLOAT_BUFFER(sm_temperature_buffer_9, (SEND_DATA_INTERVAL / MEASURE_INTERVAL))
 
-twr_data_stream_t sm_temperature_0;
-twr_data_stream_t sm_temperature_1;
-twr_data_stream_t sm_temperature_2;
-twr_data_stream_t sm_temperature_3;
-twr_data_stream_t sm_temperature_4;
-twr_data_stream_t sm_temperature_5;
-twr_data_stream_t sm_temperature_6;
-twr_data_stream_t sm_temperature_7;
-twr_data_stream_t sm_temperature_8;
-twr_data_stream_t sm_temperature_9;
+#define NUMBER_OF_SAMPLES (SEND_DATA_INTERVAL / MEASURE_INTERVAL)
 
-twr_data_stream_t *sm_temperature[] =
-{
-    &sm_temperature_0,
-    &sm_temperature_1,
-    &sm_temperature_2,
-    &sm_temperature_3,
-    &sm_temperature_4,
-    &sm_temperature_5,
-    &sm_temperature_6,
-    &sm_temperature_7,
-    &sm_temperature_8,
-    &sm_temperature_9
-};
+float sm_temperature_buffer_feed[DS18B20_SENSOR_COUNT][NUMBER_OF_SAMPLES];
+float sm_temperature_buffer_sort[DS18B20_SENSOR_COUNT][NUMBER_OF_SAMPLES];
+twr_data_stream_buffer_t sm_temperature_buffer[DS18B20_SENSOR_COUNT];
+twr_data_stream_t sm_temperature[DS18B20_SENSOR_COUNT];
 
 TWR_DATA_STREAM_FLOAT_BUFFER(sm_voltage_buffer, 8)
 
@@ -101,18 +74,11 @@ void battery_event_handler(twr_module_battery_event_t event, void *event_param)
         float voltage = NAN;
 
         twr_module_battery_get_voltage(&voltage);
-
         twr_data_stream_feed(&sm_voltage, &voltage);
-    }
-}
 
-void battery_measure_task(void *param)
-{
-    (void) param;
-
-    if (!twr_module_battery_measure())
-    {
-        twr_scheduler_plan_current_now();
+        float voltage_avg = NAN;
+        twr_data_stream_get_average(&sm_voltage, &voltage_avg);
+        twr_radio_pub_battery(&voltage_avg);
     }
 }
 
@@ -122,14 +88,21 @@ void handler_ds18b20(twr_ds18b20_t *self, uint64_t device_address, twr_ds18b20_e
 
     float value = NAN;
 
+    if (device_address == 0)
+    {
+        twr_log_debug("handler_ds18b20 event: %d", event);
+        return;
+    }
+
+    int device_index = twr_ds18b20_get_index_by_device_address(self, device_address);
+
     if (event == TWR_DS18B20_EVENT_UPDATE)
     {
         twr_ds18b20_get_temperature_celsius(self, device_address, &value);
-        int device_index = twr_ds18b20_get_index_by_device_address(self, device_address);
-
-        //twr_log_debug("UPDATE %" PRIx64 "(%d) = %f", device_address, device_index, value);
-
-        twr_data_stream_feed(sm_temperature[device_index], &value);
+        // twr_log_debug("UPDATE %" PRIx64 "(%d) = %f", device_address, device_index, value);
+        twr_data_stream_feed(&sm_temperature[device_index], &value);
+    } else {
+        twr_data_stream_reset(&sm_temperature[device_index]);
     }
 }
 
@@ -160,13 +133,13 @@ bool at_status(void)
     {
         value_avg = NAN;
 
-        if (twr_data_stream_get_average(sm_temperature[i], &value_avg))
+        if (twr_data_stream_get_average(&sm_temperature[i], &value_avg))
         {
-            twr_atci_printfln("$STATUS: \"Temperature%d\",%.1f", i, value_avg);
+            twr_atci_printfln("$STATUS: \"Temperature\",%016" PRIx64 ",%.1f", ds18b20_sensors[i]._device_address, value_avg);
         }
         else
         {
-            twr_atci_printfln("$STATUS: \"Temperature%d\",", i);
+            twr_atci_printfln("$STATUS: \"Temperature\",%016" PRIx64 ",", ds18b20_sensors[i]._device_address);
         }
     }
 
@@ -175,7 +148,7 @@ bool at_status(void)
 
 void application_init(void)
 {
-    // twr_log_init(TWR_LOG_LEVEL_DUMP, TWR_LOG_TIMESTAMP_ABS);
+    twr_log_init(TWR_LOG_LEVEL_DUMP, TWR_LOG_TIMESTAMP_ABS);
 
     // Initialize LED
     twr_led_init(&led, TWR_GPIO_LED, false, false);
@@ -188,7 +161,7 @@ void application_init(void)
     // Initialize battery
     twr_module_battery_init();
     twr_module_battery_set_event_handler(battery_event_handler, NULL);
-    battery_measure_task_id = twr_scheduler_register(battery_measure_task, NULL, 2020);
+    twr_module_battery_set_update_interval(BATTERY_UPDATE_INTERVAL);
 
     // Initialize Sensor Module
     twr_module_sensor_init();
@@ -197,19 +170,18 @@ void application_init(void)
     twr_ds18b20_init_multiple(&ds18b20, ds18b20_sensors, DS18B20_SENSOR_COUNT, TWR_DS18B20_RESOLUTION_BITS_12);
     twr_ds18b20_set_event_handler(&ds18b20, handler_ds18b20, NULL);
     twr_ds18b20_set_update_interval(&ds18b20, MEASURE_INTERVAL);
+    // twr_ds18b20_set_power_dynamic(&ds18b20, true);
 
     // Init stream buffers for averaging
     twr_data_stream_init(&sm_voltage, 1, &sm_voltage_buffer);
-    twr_data_stream_init(&sm_temperature_0, 1, &sm_temperature_buffer_0);
-    twr_data_stream_init(&sm_temperature_1, 1, &sm_temperature_buffer_1);
-    twr_data_stream_init(&sm_temperature_2, 1, &sm_temperature_buffer_2);
-    twr_data_stream_init(&sm_temperature_3, 1, &sm_temperature_buffer_3);
-    twr_data_stream_init(&sm_temperature_4, 1, &sm_temperature_buffer_4);
-    twr_data_stream_init(&sm_temperature_5, 1, &sm_temperature_buffer_5);
-    twr_data_stream_init(&sm_temperature_6, 1, &sm_temperature_buffer_6);
-    twr_data_stream_init(&sm_temperature_7, 1, &sm_temperature_buffer_7);
-    twr_data_stream_init(&sm_temperature_8, 1, &sm_temperature_buffer_8);
-    twr_data_stream_init(&sm_temperature_9, 1, &sm_temperature_buffer_9);
+
+    for (int i = 0; i < DS18B20_SENSOR_COUNT; i++) {
+        sm_temperature_buffer[i].feed = &sm_temperature_buffer_feed[i];
+        sm_temperature_buffer[i].sort = &sm_temperature_buffer_sort[i];
+        sm_temperature_buffer[i].number_of_samples = NUMBER_OF_SAMPLES;
+        sm_temperature_buffer[i].type = TWR_DATA_STREAM_TYPE_FLOAT;
+        twr_data_stream_init(&sm_temperature[i], 1, &sm_temperature_buffer[i]);
+    }
 
     twr_radio_init(TWR_RADIO_MODE_NODE_SLEEPING);
     twr_radio_pairing_request("1wire-thermometer", VERSION);
@@ -227,36 +199,31 @@ void application_init(void)
 
     // Plan task 0 (application_task) to be run after 10 seconds
     twr_scheduler_plan_relative(0, 10 * 1000);
-    
+
     twr_led_pulse(&led, 2000);
 }
 
 
 void application_task(void)
 {
-    twr_scheduler_plan_relative(battery_measure_task_id, 0);
-
-    float voltage_avg = NAN;
-
-    twr_data_stream_get_average(&sm_voltage, &voltage_avg);
-
-    bc_radio_pub_battery(&voltage_avg);
-
     int sensor_found = twr_ds18b20_get_sensor_found(&ds18b20);
 
     for (int i = 0; i < sensor_found; i++)
     {
         float temperature_avg = NAN;
 
-        twr_data_stream_get_average(sm_temperature[i], &temperature_avg);
+        twr_data_stream_get_average(&sm_temperature[i], &temperature_avg);
+
+        static char topic[64];
+        snprintf(topic, sizeof(topic), "thermometer/%016" PRIx64 "/temperature", ds18b20_sensors[i]._device_address);
 
         if (!isnan(temperature_avg))
         {
-            bc_radio_pub_temperature(i, &temperature_avg);
+            twr_radio_pub_float(topic, &temperature_avg);
         }
         else
         {
-            bc_radio_pub_temperature(i, NULL);
+            twr_radio_pub_float(topic, NULL);
         }
     }
 
