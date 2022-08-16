@@ -184,7 +184,7 @@ void application_init(void)
     }
 
     twr_radio_init(TWR_RADIO_MODE_NODE_SLEEPING);
-    twr_radio_pairing_request("1wire-thermometer", VERSION);
+    twr_radio_pairing_request("1wire-thermometer", FW_VERSION);
 
     // Initialize AT command interface
     at_init(&led);
