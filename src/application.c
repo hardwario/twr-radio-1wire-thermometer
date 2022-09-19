@@ -146,6 +146,12 @@ bool at_status(void)
     return true;
 }
 
+bool at_rescan(void)
+{
+    twr_ds18b20_rescan(&ds18b20);
+    return true;
+}
+
 void application_init(void)
 {
     twr_log_init(TWR_LOG_LEVEL_DUMP, TWR_LOG_TIMESTAMP_ABS);
@@ -191,6 +197,7 @@ void application_init(void)
     static const twr_atci_command_t commands[] = {
             {"$SEND", at_send, NULL, NULL, NULL, "Immediately send packet"},
             {"$STATUS", at_status, NULL, NULL, NULL, "Show status"},
+            {"$RESCAN", at_rescan, NULL, NULL, NULL, "Rescan"},
             AT_LED_COMMANDS,
             TWR_ATCI_COMMAND_CLAC,
             TWR_ATCI_COMMAND_HELP
