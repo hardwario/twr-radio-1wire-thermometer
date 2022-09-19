@@ -55,13 +55,21 @@ void button_event_handler(twr_button_t *self, twr_button_event_t event, void *ev
     {
         header = HEADER_BUTTON_CLICK;
 
+        twr_atci_println("@BUTTON: CLICK");
+
         twr_scheduler_plan_now(0);
+
+        twr_led_pulse(&led, 50);
     }
     else if (event == TWR_BUTTON_EVENT_HOLD)
     {
         header = HEADER_BUTTON_HOLD;
 
+        twr_atci_println("@BUTTON: HOLD");
+
         twr_scheduler_plan_now(0);
+
+        twr_led_pulse(&led, 200);
     }
 }
 
