@@ -152,6 +152,13 @@ bool at_rescan(void)
     return true;
 }
 
+bool at_measure(void)
+{
+    twr_module_battery_measure();
+    twr_ds18b20_measure(&ds18b20);
+    return true;
+}
+
 void application_init(void)
 {
     twr_log_init(TWR_LOG_LEVEL_DUMP, TWR_LOG_TIMESTAMP_ABS);
@@ -198,6 +205,7 @@ void application_init(void)
             {"$SEND", at_send, NULL, NULL, NULL, "Immediately send packet"},
             {"$STATUS", at_status, NULL, NULL, NULL, "Show status"},
             {"$RESCAN", at_rescan, NULL, NULL, NULL, "Rescan"},
+            {"$MEASURE", at_measure, NULL, NULL, NULL, "Run measure"},
             AT_LED_COMMANDS,
             TWR_ATCI_COMMAND_CLAC,
             TWR_ATCI_COMMAND_HELP
